@@ -1,0 +1,7 @@
+.pytest_cache
+__pycache__
+venv
+controllers/__pycache__
+models/__pycache__
+views/__pycache__
+tests/__pycache__
