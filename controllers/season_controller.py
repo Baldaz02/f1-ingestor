@@ -1,4 +1,5 @@
 """Controller for managing F1 season data and interactions."""
+from datetime import date
 from typing import Callable, Dict, List, Optional
 from models.data_store import DataStore
 from models.season import Season
@@ -15,8 +16,8 @@ class SeasonController:
         """Initialize the controller with a data store."""
         self._data_store = DataStore()
         years = self._data_store.get_available_years()
-        # Default season = current calendar year when available (same order as year menu).
-        self._current_year: int = years[0] if years else 2019
+        # Default season = newest available year, or calendar year when the store is empty.
+        self._current_year: int = years[0] if years else date.today().year
         self._observers: List[Callable] = []
     
     @property
@@ -50,6 +51,14 @@ class SeasonController:
         """Notify all observers of data changes."""
         for callback in self._observers:
             callback()
+    
+    def notify_data_changed(self) -> None:
+        """Notify observers after model updates (e.g. from UI after a background import)."""
+        self._notify_observers()
+    
+    def import_current_season_from_fastf1(self) -> None:
+        """Replace the current season with events from the FastF1 schedule (no observer call)."""
+        self._data_store.replace_season_from_fastf1(self._current_year)
     
     def get_available_years(self) -> List[int]:
         """Get list of available season years."""

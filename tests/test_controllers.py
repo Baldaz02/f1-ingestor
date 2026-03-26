@@ -9,27 +9,38 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from controllers.season_controller import SeasonController
+from models.data_store import MIN_SEASON_YEAR
 from models.event import EventStatus
 
 
+def _controller_with_mock_data() -> SeasonController:
+    """Controller with bundled mock seasons (same as pre–empty-store behavior)."""
+    c = SeasonController()
+    c.data_store.populate_mock_f1_data()
+    years = c.get_available_years()
+    if years:
+        c.current_year = years[0]
+    return c
+
+
 def _expected_year_menu_top() -> int:
-    """Latest year shown first in UI (mock data tops out at 2026)."""
-    return min(date.today().year, 2026)
+    """Latest year in the season selector (current calendar year, at least MIN_SEASON_YEAR)."""
+    return max(date.today().year, MIN_SEASON_YEAR)
 
 
 class TestSeasonController:
     """Test cases for the SeasonController."""
     
     def test_controller_initialization(self):
-        """Test controller initializes with default values."""
+        """Test controller initializes with default values (newest selectable season year)."""
         controller = SeasonController()
         
         assert controller.current_year == _expected_year_menu_top()
         assert controller.data_store is not None
     
     def test_controller_get_available_years(self):
-        """Test getting available years (current year down to 2019, capped at mock max 2026)."""
-        controller = SeasonController()
+        """Test getting available years (current calendar year down to 2019)."""
+        controller = _controller_with_mock_data()
         
         years = controller.get_available_years()
         top = _expected_year_menu_top()
@@ -43,7 +54,7 @@ class TestSeasonController:
     
     def test_controller_set_current_year(self):
         """Test setting current year."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         
         controller.current_year = 2023
         
@@ -60,7 +71,7 @@ class TestSeasonController:
     
     def test_controller_get_current_season(self):
         """Test getting current season."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         season = controller.get_current_season()
@@ -70,7 +81,7 @@ class TestSeasonController:
     
     def test_controller_get_events_for_current_season(self):
         """Test getting events for current season."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         events = controller.get_events_for_current_season()
@@ -80,7 +91,7 @@ class TestSeasonController:
     
     def test_controller_get_upcoming_events(self):
         """Test getting upcoming events."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2026  # Has both completed and upcoming
         
         upcoming = controller.get_upcoming_events()
@@ -89,7 +100,7 @@ class TestSeasonController:
     
     def test_controller_get_completed_events(self):
         """Test getting completed events."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024  # Fully completed
         
         completed = controller.get_completed_events()
@@ -99,7 +110,7 @@ class TestSeasonController:
     
     def test_controller_get_season_stats(self):
         """Test getting season statistics."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         stats = controller.get_season_stats()
@@ -120,7 +131,7 @@ class TestSeasonController:
     
     def test_controller_search_events(self):
         """Test event search functionality."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         # Search by name
@@ -142,7 +153,7 @@ class TestSeasonController:
     
     def test_controller_filter_events_by_status(self):
         """Test filtering events by status."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2025
         
         # Filter completed
@@ -163,7 +174,7 @@ class TestSeasonController:
     
     def test_controller_get_event_by_round(self):
         """Test getting event by round number."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         event = controller.get_event_by_round(1)
@@ -173,7 +184,7 @@ class TestSeasonController:
     
     def test_controller_get_next_event(self):
         """Test getting next upcoming event."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2026  # Has upcoming events
         
         next_event = controller.get_next_event()
@@ -183,7 +194,7 @@ class TestSeasonController:
     
     def test_controller_get_last_completed_event(self):
         """Test getting last completed event."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         last_event = controller.get_last_completed_event()
@@ -193,7 +204,7 @@ class TestSeasonController:
     
     def test_controller_get_winners_count(self):
         """Test getting winner statistics."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         winners = controller.get_winners_count()
@@ -207,7 +218,7 @@ class TestSeasonController:
     
     def test_controller_get_pole_positions_count(self):
         """Test getting pole position statistics."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         poles = controller.get_pole_positions_count()
@@ -217,7 +228,7 @@ class TestSeasonController:
     
     def test_controller_observer_pattern(self):
         """Test observer notification system."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         callback_called = [False]  # Use list to allow modification in closure
         
         def observer():
@@ -230,7 +241,7 @@ class TestSeasonController:
     
     def test_controller_remove_observer(self):
         """Test removing observer."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         callback_called = [False]
         
         def observer():
@@ -244,7 +255,7 @@ class TestSeasonController:
     
     def test_controller_multiple_observers(self):
         """Test multiple observers are notified."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         calls = []
         
         def observer1():
@@ -262,7 +273,7 @@ class TestSeasonController:
     
     def test_controller_get_season_for_specific_year(self):
         """Test getting season for specific year."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         
         season = controller.get_season(2019)
         
@@ -272,7 +283,7 @@ class TestSeasonController:
     
     def test_controller_get_all_seasons(self):
         """Test getting all seasons."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         
         seasons = controller.get_all_seasons()
         
@@ -285,7 +296,7 @@ class TestSeasonControllerEdgeCases:
     
     def test_empty_search_query(self):
         """Test search with empty query."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         all_events = controller.get_events_for_current_season()
@@ -295,7 +306,7 @@ class TestSeasonControllerEdgeCases:
     
     def test_no_match_search(self):
         """Test search with no matches."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         results = controller.search_events("XYZNONEXISTENT")
@@ -304,7 +315,7 @@ class TestSeasonControllerEdgeCases:
     
     def test_case_insensitive_search(self):
         """Test case insensitive search."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         lower_results = controller.search_events("monaco")
@@ -315,7 +326,7 @@ class TestSeasonControllerEdgeCases:
     
     def test_invalid_filter_status(self):
         """Test filter with invalid status."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024
         
         # Invalid status should return all events
@@ -326,7 +337,7 @@ class TestSeasonControllerEdgeCases:
     
     def test_no_upcoming_events_season(self):
         """Test getting next event when none upcoming."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2024  # Fully completed season
         
         next_event = controller.get_next_event()
@@ -337,7 +348,7 @@ class TestSeasonControllerEdgeCases:
     
     def test_2026_season_in_progress_has_completed_and_upcoming(self):
         """2026 lists partition the season; mix depends on date.today()."""
-        controller = SeasonController()
+        controller = _controller_with_mock_data()
         controller.current_year = 2026
         
         completed = controller.get_completed_events()

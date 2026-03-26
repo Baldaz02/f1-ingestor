@@ -150,19 +150,11 @@ class EventCard(tk.Frame):
             anchor='w'
         )
         name_label.pack(side='left', fill='x')
+        if self.event.official_name:
+            name_label._f1_tooltip_widget = True
+            self._attach_tooltip(name_label, self.event.official_name)
         
-        # Circuit
-        circuit_label = tk.Label(
-            details_frame,
-            text=self.event.circuit,
-            font=('Arial', 11),
-            fg=F1Theme.TEXT_SECONDARY,
-            bg=F1Theme.CARD_BG,
-            anchor='w'
-        )
-        circuit_label.pack(fill='x', pady=(4, 0))
-        
-        # City
+        # Location
         city_label = tk.Label(
             details_frame,
             text=f"📍 {self.event.city}, {self.event.country}",
@@ -171,7 +163,7 @@ class EventCard(tk.Frame):
             bg=F1Theme.CARD_BG,
             anchor='w'
         )
-        city_label.pack(fill='x', pady=(2, 0))
+        city_label.pack(fill='x', pady=(4, 0))
         
         # Date and status row
         date_frame = tk.Frame(details_frame, bg=F1Theme.CARD_BG)

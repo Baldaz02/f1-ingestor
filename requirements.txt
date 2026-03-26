@@ -1,0 +1,20 @@
+# F1 Ingestor — application dependencies
+# Python 3.9+ required (use Python 3’s pip: python3 -m pip install -r requirements.txt)
+#
+# GUI: Tkinter from the Python standard library — no extra GUI package.
+
+# Locales (views/locales/*.yml)
+PyYAML>=6.0.1
+
+# F1 schedule import (no-results screen)
+pandas>=2.0.0
+fastf1>=3.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Development tools (optional)
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0

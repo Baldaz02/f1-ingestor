@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.event import Event, EventStatus
 from models.season import Season
-from models.data_store import DataStore
+from models.data_store import MIN_SEASON_YEAR, DataStore
 
 
 class TestEvent:
@@ -119,6 +119,7 @@ class TestEvent:
         assert data['country'] == "Australia"
         assert data['flag_emoji'] == "🇦🇺"
         assert data['status'] == "upcoming"
+        assert data.get("official_name") is None
     
     def test_event_from_dict(self):
         """Test event creation from dictionary."""
@@ -332,19 +333,21 @@ class TestDataStore:
     """Test cases for the DataStore."""
     
     def test_data_store_initialization(self):
-        """Test data store creates all seasons; menu lists current year … 2019 (cap 2026)."""
+        """Selectable years are current calendar year … 2019; independent of stored seasons."""
         store = DataStore()
-        
+        top = max(date.today().year, MIN_SEASON_YEAR)
         years = store.get_available_years()
-        top = min(date.today().year, 2026)
-        
         assert years[0] == top
-        assert years[-1] == 2019
-        assert set(years) == set(range(2019, top + 1))
+        assert years[-1] == MIN_SEASON_YEAR
+        assert set(years) == set(range(MIN_SEASON_YEAR, top + 1))
+        
+        store.populate_mock_f1_data()
+        assert store.get_available_years() == years
     
     def test_data_store_get_season(self):
         """Test getting a specific season."""
         store = DataStore()
+        store.populate_mock_f1_data()
         
         season = store.get_season(2024)
         
@@ -363,6 +366,7 @@ class TestDataStore:
     def test_data_store_2019_season(self):
         """Test 2019 season has correct data."""
         store = DataStore()
+        store.populate_mock_f1_data()
         
         season = store.get_season(2019)
         
@@ -374,6 +378,7 @@ class TestDataStore:
     def test_data_store_2023_season(self):
         """Test 2023 season has correct data."""
         store = DataStore()
+        store.populate_mock_f1_data()
         
         season = store.get_season(2023)
         
@@ -385,6 +390,7 @@ class TestDataStore:
     def test_data_store_2026_season(self):
         """2026 completion split follows current date (mock calendar)."""
         store = DataStore()
+        store.populate_mock_f1_data()
         
         season = store.get_season(2026)
         
@@ -400,9 +406,9 @@ class TestDataStore:
     def test_data_store_events_have_required_fields(self):
         """Test all events have required fields."""
         store = DataStore()
+        store.populate_mock_f1_data()
         
-        for year in store.get_available_years():
-            season = store.get_season(year)
+        for season in store.get_all_seasons():
             for event in season.events:
                 assert event.id
                 assert event.name
@@ -416,6 +422,7 @@ class TestDataStore:
     def test_data_store_completed_events_have_winners(self):
         """Test completed events have winner information."""
         store = DataStore()
+        store.populate_mock_f1_data()
         
         for year in [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]:
             season = store.get_season(year)

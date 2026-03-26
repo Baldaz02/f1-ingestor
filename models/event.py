@@ -21,7 +21,7 @@ class Event:
     
     Attributes:
         id: Unique identifier for the event
-        name: Official name of the Grand Prix
+        name: Display title (short name when imported from FastF1 ``EventName``)
         country: Country where the event takes place
         circuit: Name of the racing circuit
         city: City where the circuit is located
@@ -32,6 +32,7 @@ class Event:
         pole_position: Driver who secured pole position
         fastest_lap: Driver with the fastest lap
         flag_emoji: Country flag emoji
+        official_name: Long / official title when available (e.g. FastF1 ``OfficialEventName``); UI uses ``name`` for display (short title).
     """
     id: str
     name: str
@@ -45,6 +46,7 @@ class Event:
     pole_position: Optional[str] = None
     fastest_lap: Optional[str] = None
     flag_emoji: str = "🏁"
+    official_name: Optional[str] = None
     
     def __post_init__(self):
         """Validate event data after initialization."""
@@ -92,7 +94,8 @@ class Event:
             'winner': self.winner,
             'pole_position': self.pole_position,
             'fastest_lap': self.fastest_lap,
-            'flag_emoji': self.flag_emoji
+            'flag_emoji': self.flag_emoji,
+            'official_name': self.official_name,
         }
     
     @classmethod
@@ -110,5 +113,6 @@ class Event:
             winner=data.get('winner'),
             pole_position=data.get('pole_position'),
             fastest_lap=data.get('fastest_lap'),
-            flag_emoji=data.get('flag_emoji', '🏁')
+            flag_emoji=data.get('flag_emoji', '🏁'),
+            official_name=data.get('official_name'),
         )

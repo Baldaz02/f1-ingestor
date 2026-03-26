@@ -73,14 +73,33 @@ def sample_season():
 
 @pytest.fixture
 def data_store():
-    """Create a data store instance."""
+    """Create an empty data store instance."""
     return DataStore()
 
 
 @pytest.fixture
+def populated_data_store():
+    """Data store with bundled mock seasons 2019–2026."""
+    store = DataStore()
+    store.populate_mock_f1_data()
+    return store
+
+
+@pytest.fixture
 def controller():
-    """Create a controller instance."""
+    """Create a controller instance (empty store)."""
     return SeasonController()
+
+
+@pytest.fixture
+def populated_controller():
+    """Controller whose store is filled with mock F1 data."""
+    c = SeasonController()
+    c.data_store.populate_mock_f1_data()
+    years = c.get_available_years()
+    if years:
+        c.current_year = years[0]
+    return c
 
 
 @pytest.fixture

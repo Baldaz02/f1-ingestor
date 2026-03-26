@@ -1,10 +1,12 @@
 """Main window view for F1 Ingestor."""
 import re
+import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import List, Set
 from controllers.season_controller import SeasonController
 from models.event import Event
+from services.fastf1_schedule import events_from_fastf1_schedule
 from views.event_card import EventCard
 from views.i18n import (
     DEFAULT_LANGUAGE,
@@ -886,7 +888,7 @@ class MainWindow(tk.Tk):
         return self.controller.filter_events_by_status(self._current_filter)
     
     def _show_no_results(self):
-        """Show no results message."""
+        """Show no results message and FastF1 import action (same blue as main Import)."""
         no_results_frame = tk.Frame(self.events_container, bg=F1Theme.SURFACE)
         no_results_frame.grid(row=0, column=0, columnspan=3, padx=8, pady=40, sticky="ew")
         
@@ -897,7 +899,87 @@ class MainWindow(tk.Tk):
             fg=F1Theme.TEXT_MUTED,
             bg=F1Theme.SURFACE
         )
-        no_results_label.pack(pady=40)
+        no_results_label.pack(pady=(20, 12))
+        self._no_results_import_btn = FilterPillButton(
+            no_results_frame,
+            text=f"{IMPORT_ACTION_ICON}  {self._t('import_events_action')}",
+            command=self._on_import_events_fastf1,
+            active_fill=_IMPORT_BLUE_ACTIVE,
+            active_hover=_IMPORT_BLUE_HOVER,
+            active_text=F1Theme.TEXT_PRIMARY,
+            inactive_fill=_IMPORT_BLUE_ACTIVE,
+            inactive_hover=_IMPORT_BLUE_HOVER,
+            inactive_text=F1Theme.TEXT_PRIMARY,
+            pill_height=36,
+            corner_radius=50,
+            pad_x=20,
+            bg_parent=F1Theme.SURFACE,
+            allow_click_when_inactive=True,
+        )
+        self._no_results_import_btn.set_active(True)
+        self._no_results_import_btn.pack(pady=(0, 24))
+    
+    def _show_fastf1_loading(self) -> None:
+        """Placeholder while FastF1 loads (replaced by cards as chunks arrive)."""
+        for widget in self.events_container.winfo_children():
+            widget.destroy()
+        loading_frame = tk.Frame(self.events_container, bg=F1Theme.SURFACE)
+        loading_frame.grid(row=0, column=0, columnspan=3, padx=8, pady=40, sticky="ew")
+        self._fastf1_loading_label = tk.Label(
+            loading_frame,
+            text=self._t("import_events_loading"),
+            font=("Arial", 14),
+            fg=F1Theme.TEXT_MUTED,
+            bg=F1Theme.SURFACE,
+        )
+        self._fastf1_loading_label.pack(pady=40)
+
+    def _apply_fastf1_chunk(self, year: int, events: List[Event]) -> None:
+        """Main thread only: apply partial/full schedule and redraw cards."""
+        self.controller.data_store.set_season_events(year, events)
+        self._current_filter = "all"
+        for value, btn in self.filter_buttons.items():
+            btn.set_active(value == "all")
+        self._current_page = 1
+        self._update_stats()
+        self._update_champion_info()
+        self._display_events()
+
+    def _finalize_fastf1_import(self) -> None:
+        """Sync toolbar/year/import state after the last chunk (same as season data change)."""
+        self._current_filter = "all"
+        for value, btn in self.filter_buttons.items():
+            btn.set_active(value == "all")
+        self._on_data_changed()
+
+    def _on_import_events_fastf1(self) -> None:
+        """Fetch schedule on a worker thread; apply chunks on the main thread so Tk updates safely."""
+
+        self._show_fastf1_loading()
+
+        def work() -> None:
+            try:
+                year = self.controller.current_year
+
+                def on_chunk(evs: List[Event]) -> None:
+                    snap = list(evs)
+                    self.after(0, lambda s=snap, y=year: self._apply_fastf1_chunk(y, s))
+
+                events_from_fastf1_schedule(year, on_chunk=on_chunk)
+                self.after(0, self._finalize_fastf1_import)
+            except Exception as e:
+                self.after(0, lambda err=e: self._import_events_failed(err))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _import_events_failed(self, exc: Exception) -> None:
+        detail = str(exc).strip() or exc.__class__.__name__
+        messagebox.showerror(
+            f"🏎️ {self._t('window_title')}",
+            self._t("import_events_error").format(detail=detail),
+            parent=self,
+        )
+        self._display_events()
     
     def _refresh_language_ui(self) -> None:
         """Update all visible strings after a language change."""

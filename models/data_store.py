@@ -1,4 +1,4 @@
-"""Data store with mock F1 season data from 2019 to 2026."""
+"""Data store for F1 seasons and events (empty by default)."""
 from datetime import date, datetime
 from typing import Dict, List, Optional
 from .event import Event, EventStatus
@@ -11,9 +11,8 @@ MIN_SEASON_YEAR = 2019
 class DataStore:
     """
     Central data store for F1 seasons and events.
-    Contains mock data for seasons 2019-2026.
-    Seasons 2019-2025 are fixed completed calendars. The 2026 season marks races on or
-    before ``date.today()`` as completed (with mock results); later races stay upcoming.
+    Starts with no seasons. Call ``populate_mock_f1_data()`` to load bundled mock
+    calendars for 2019–2026 (for tests or demos).
     """
     
     # F1 Drivers for mock data
@@ -55,17 +54,17 @@ class DataStore:
         "Austria": "🇦🇹", "United Kingdom": "🇬🇧", "Germany": "🇩🇪", "Hungary": "🇭🇺",
         "Belgium": "🇧🇪", "Italy": "🇮🇹", "Singapore": "🇸🇬", "Russia": "🇷🇺",
         "Japan": "🇯🇵", "Mexico": "🇲🇽", "United States": "🇺🇸", "Brazil": "🇧🇷",
-        "Abu Dhabi": "🇦🇪", "Netherlands": "🇳🇱", "Portugal": "🇵🇹", "Turkey": "🇹🇷",
+        "Abu Dhabi": "🇦🇪", "United Arab Emirates": "🇦🇪", "Netherlands": "🇳🇱", "Portugal": "🇵🇹", "Turkey": "🇹🇷",
         "Saudi Arabia": "🇸🇦", "Qatar": "🇶🇦", "Las Vegas": "🇺🇸", "Miami": "🇺🇸"
     }
     
     def __init__(self):
-        """Initialize the data store with mock data."""
+        """Initialize an empty data store."""
         self._seasons: Dict[int, Season] = {}
-        self._load_mock_data()
     
-    def _load_mock_data(self):
-        """Load mock F1 data for seasons 2019-2026."""
+    def populate_mock_f1_data(self) -> None:
+        """Load bundled mock F1 data for seasons 2019–2026 (tests / demos)."""
+        self._seasons.clear()
         self._seasons[2019] = self._create_2019_season()
         self._seasons[2020] = self._create_2020_season()
         self._seasons[2021] = self._create_2021_season()
@@ -84,11 +83,21 @@ class DataStore:
         return sorted(self._seasons.values(), key=lambda s: s.year)
     
     def get_available_years(self) -> List[int]:
-        """Newest first: ``date.today().year`` down to ``MIN_SEASON_YEAR``; only years we have data for."""
-        if not self._seasons:
-            return []
+        """Selectable UI years: newest first, from the current calendar year down to ``MIN_SEASON_YEAR``."""
         top = max(date.today().year, MIN_SEASON_YEAR)
-        return [y for y in range(top, MIN_SEASON_YEAR - 1, -1) if y in self._seasons]
+        return list(range(top, MIN_SEASON_YEAR - 1, -1))
+    
+    def set_season_events(self, year: int, events: List[Event]) -> None:
+        """Replace the season for ``year`` with the given event list (sorted by round)."""
+        season = Season(year=year, champion=None, constructor_champion=None)
+        season.events = sorted(events, key=lambda e: e.round_number)
+        self._seasons[year] = season
+
+    def replace_season_from_fastf1(self, year: int) -> None:
+        """Replace or create the season for ``year`` using the FastF1 championship schedule."""
+        from services.fastf1_schedule import events_from_fastf1_schedule
+
+        self.set_season_events(year, events_from_fastf1_schedule(year))
     
     def _create_event(self, round_num: int, name: str, country: str, circuit: str, 
                       city: str, date: datetime, status: EventStatus = EventStatus.COMPLETED,
