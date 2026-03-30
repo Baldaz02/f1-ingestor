@@ -30,7 +30,8 @@ class Event:
         status: Current status of the event
         winner: Name of the race winner (if completed)
         pole_position: Driver who secured pole position
-        fastest_lap: Driver with the fastest lap
+        fastest_lap: Driver with the fastest lap in the race
+        qualifying_fastest_lap: Driver with the fastest lap in qualifying (if loaded)
         flag_emoji: Country flag emoji
         official_name: Long / official title when available (e.g. FastF1 ``OfficialEventName``); UI uses ``name`` for display (short title).
     """
@@ -45,6 +46,7 @@ class Event:
     winner: Optional[str] = None
     pole_position: Optional[str] = None
     fastest_lap: Optional[str] = None
+    qualifying_fastest_lap: Optional[str] = None
     flag_emoji: str = "🏁"
     official_name: Optional[str] = None
     
@@ -94,6 +96,7 @@ class Event:
             'winner': self.winner,
             'pole_position': self.pole_position,
             'fastest_lap': self.fastest_lap,
+            'qualifying_fastest_lap': self.qualifying_fastest_lap,
             'flag_emoji': self.flag_emoji,
             'official_name': self.official_name,
         }
@@ -113,6 +116,7 @@ class Event:
             winner=data.get('winner'),
             pole_position=data.get('pole_position'),
             fastest_lap=data.get('fastest_lap'),
+            qualifying_fastest_lap=data.get('qualifying_fastest_lap'),
             flag_emoji=data.get('flag_emoji', '🏁'),
             official_name=data.get('official_name'),
         )

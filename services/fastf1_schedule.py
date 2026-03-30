@@ -79,6 +79,7 @@ def events_from_fastf1_schedule(
     year: int,
     *,
     on_chunk: Optional[Callable[[List[Event]], None]] = None,
+    on_schedule_progress: Optional[Callable[[int, int, List[Event]], None]] = None,
 ) -> List[Event]:
     """Load the championship schedule for ``year`` and return ``Event`` rows (rounds only).
 
@@ -115,7 +116,9 @@ def events_from_fastf1_schedule(
     if schedule is None or len(schedule) == 0:
         raise ValueError(f"No schedule returned for season {year}.")
 
+    schedule_row_total = len(schedule)
     events: List[Event] = []
+    schedule_idx = 0
     for _, row in schedule.iterrows():
         rn = row.get("RoundNumber")
         if rn is None or pd.isna(rn):
@@ -164,13 +167,17 @@ def events_from_fastf1_schedule(
             winner=None,
             pole_position=None,
             fastest_lap=None,
+            qualifying_fastest_lap=None,
             flag_emoji=flag,
             official_name=official_name,
         )
         events.append(ev)
+        schedule_idx += 1
+        events.sort(key=lambda e: e.round_number)
         if on_chunk is not None:
-            events.sort(key=lambda e: e.round_number)
             on_chunk(list(events))
+        if on_schedule_progress is not None:
+            on_schedule_progress(schedule_idx, schedule_row_total, list(events))
 
     events.sort(key=lambda e: e.round_number)
     if not events:

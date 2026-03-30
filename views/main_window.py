@@ -2,10 +2,12 @@
 import re
 import threading
 import tkinter as tk
+from collections import deque
 from tkinter import messagebox, ttk
-from typing import List, Set
+from typing import List, Optional, Set
 from controllers.season_controller import SeasonController
 from models.event import Event
+from services.fastf1_import import run_fastf1_import
 from services.fastf1_schedule import events_from_fastf1_schedule
 from views.event_card import EventCard
 from views.i18n import (
@@ -69,6 +71,9 @@ class MainWindow(tk.Tk):
         self._total_pages = 1
         self._import_selected_ids: Set[str] = set()
         self._import_view_active = False
+        self._import_worker_running = False
+        self._import_step_deque: deque[str] = deque(maxlen=3)
+        self._last_import_progress = 0.0
         self._pagination_syncing = False
         self._pagination_prev_packed = False
         self._pagination_next_packed = False
@@ -377,6 +382,184 @@ class MainWindow(tk.Tk):
         if fill_w > 0:
             c.create_rectangle(0, 0, fill_w, h, fill=fill_color, outline="", width=0)
     
+    def _on_import_progress_canvas_configure(self, event=None) -> None:
+        self._draw_import_progress_bar(self._last_import_progress)
+    
+    def _draw_import_progress_bar(self, pct: float) -> None:
+        """Import header bar fill; same semantics as the main header progress bar."""
+        if not hasattr(self, "_import_progress_canvas"):
+            return
+        self._last_import_progress = max(0.0, min(100.0, float(pct)))
+        fill_color = self._header_progress_accent_color(self._last_import_progress)
+        c = self._import_progress_canvas
+        c.delete("all")
+        try:
+            w = max(2, int(c.winfo_width()))
+            h = max(2, int(c.winfo_height()))
+        except tk.TclError:
+            return
+        if w < 2:
+            w = self._import_progress_bar_width
+        fill_w = int(w * self._last_import_progress / 100.0)
+        c.create_rectangle(0, 0, w, h, fill=F1Theme.BORDER, outline="", width=0)
+        if fill_w > 0:
+            c.create_rectangle(0, 0, fill_w, h, fill=fill_color, outline="", width=0)
+    
+    def _set_import_back_state(self, enabled: bool) -> None:
+        if not hasattr(self, "_import_back_label"):
+            return
+        if enabled:
+            self._import_back_label.configure(cursor="hand2", fg=F1Theme.TEXT_PRIMARY)
+        else:
+            self._import_back_label.configure(cursor="arrow", fg=F1Theme.TEXT_MUTED)
+    
+    def _reset_import_progress_ui(self) -> None:
+        self._last_import_progress = 0.0
+        self._import_step_deque.clear()
+        if hasattr(self, "_import_steps_label"):
+            self._import_steps_label.configure(text="")
+        if hasattr(self, "_import_pct_label"):
+            self._import_pct_label.configure(
+                text="0%",
+                fg=self._header_progress_accent_color(0.0),
+            )
+        if hasattr(self, "_import_progress_canvas"):
+            self._draw_import_progress_bar(0.0)
+        if hasattr(self, "_import_log_text"):
+            self._import_log_text.configure(state="normal")
+            self._import_log_text.delete("1.0", "end")
+            self._import_log_text.configure(state="disabled")
+    
+    def _format_import_step(self, step: str, round_num: Optional[int]) -> str:
+        if step == "schedule":
+            return self._t("import_step_schedule")
+        if step == "enrichment" and round_num is not None:
+            return self._t("import_step_round").format(round=round_num)
+        if step == "enrichment":
+            return self._t("import_step_enrichment")
+        if step == "champions":
+            return self._t("import_step_champions")
+        if step == "done":
+            return self._t("import_step_done")
+        return step
+    
+    def _import_on_progress(self, pct: float, step: str, round_num: Optional[int]) -> None:
+        self._draw_import_progress_bar(pct)
+        self._import_pct_label.configure(
+            text=f"{pct:.0f}%",
+            fg=self._header_progress_accent_color(pct),
+        )
+        self._import_step_deque.append(self._format_import_step(step, round_num))
+        self._import_steps_label.configure(text="\n".join(self._import_step_deque))
+    
+    def _import_append_log(self, line: str) -> None:
+        if not hasattr(self, "_import_log_text"):
+            return
+        self._import_log_text.configure(state="normal")
+        self._import_log_text.insert("end", line + "\n")
+        self._import_log_text.see("end")
+        self._import_log_text.configure(state="disabled")
+    
+    def _toggle_import_logs(self, event=None) -> None:
+        self._import_log_expanded = not self._import_log_expanded
+        arrow = "▴" if self._import_log_expanded else "▾"
+        self._import_log_header_label.configure(
+            text=f"{self._t('import_logs_accordion')}  {arrow}",
+        )
+        if self._import_log_expanded:
+            self._import_log_inner.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 10))
+            self._import_log_acc.grid_rowconfigure(1, weight=1)
+        else:
+            self._import_log_inner.grid_remove()
+            self._import_log_acc.grid_rowconfigure(1, weight=0)
+    
+    def _on_import_back_click(self, event=None) -> None:
+        self._on_import_back()
+    
+    def _selected_import_round_numbers(self) -> Set[int]:
+        events = self.controller.get_events_for_current_season()
+        by_id = {e.id: e for e in events}
+        return {by_id[i].round_number for i in self._import_selected_ids if i in by_id}
+    
+    def _on_import_start_fastf1(self) -> None:
+        if self._import_worker_running or not self._import_selected_ids:
+            return
+        self._reset_import_progress_ui()
+        self._import_worker_running = True
+        self._set_import_back_state(False)
+        self._import_start_btn.set_active(False)
+        year = self.controller.current_year
+        rounds = self._selected_import_round_numbers()
+        
+        def work() -> None:
+            try:
+                def on_prog(pct: float, step: str, rnd: Optional[int]) -> None:
+                    self.after(0, lambda p=pct, s=step, r=rnd: self._import_on_progress(p, s, r))
+                
+                def on_log(line: str) -> None:
+                    self.after(0, lambda l=line: self._import_append_log(l))
+                
+                def on_chunk(evs: List[Event]) -> None:
+                    snap = list(evs)
+                    self.after(0, lambda: self._apply_fastf1_chunk(year, snap, None, None))
+                
+                evs, d_ch, c_ch = run_fastf1_import(
+                    year,
+                    selected_round_numbers=rounds,
+                    on_progress=on_prog,
+                    on_log=on_log,
+                    on_chunk=on_chunk,
+                )
+                self.after(
+                    0,
+                    lambda y=year, e=list(evs), d=d_ch, c=c_ch: self._import_screen_import_finished(
+                        y, e, d, c
+                    ),
+                )
+            except Exception as e:
+                self.after(0, lambda err=e: self._import_screen_import_failed(err))
+        
+        threading.Thread(target=work, daemon=True).start()
+    
+    def _import_screen_import_finished(
+        self,
+        year: int,
+        events: List[Event],
+        driver_champion: Optional[str],
+        constructor_champion: Optional[str],
+    ) -> None:
+        self._import_worker_running = False
+        self.controller.data_store.set_season_events(
+            year,
+            events,
+            driver_champion=driver_champion,
+            constructor_champion=constructor_champion,
+        )
+        # Stay on the import screen; do not call _on_data_changed (it would close this view).
+        self._current_filter = "all"
+        for value, btn in self.filter_buttons.items():
+            btn.set_active(value == "all")
+        self._current_page = 1
+        self.year_var.set(str(self.controller.current_year))
+        self._rebuild_year_menu()
+        self._update_stats()
+        self._update_champion_info()
+        self._refresh_import_screen_list()
+        self._set_import_back_state(True)
+        self._import_start_btn.set_active(True)
+    
+    def _import_screen_import_failed(self, exc: Exception) -> None:
+        self._import_worker_running = False
+        self._set_import_back_state(True)
+        self._import_start_btn.set_active(True)
+        detail = str(exc).strip() or exc.__class__.__name__
+        self._import_append_log(detail)
+        messagebox.showerror(
+            f"🏎️ {self._t('window_title')}",
+            self._t("import_events_error").format(detail=detail),
+            parent=self,
+        )
+    
     def _create_main_content(self):
         """Create the main content area."""
         self._main_frame = tk.Frame(self, bg=F1Theme.SECONDARY)
@@ -596,13 +779,14 @@ class MainWindow(tk.Tk):
         import_inner = tk.Frame(self._import_panel, bg=F1Theme.SECONDARY)
         import_inner.pack(fill=tk.BOTH, expand=True)
         
-        # Same strip as main header: dark bar, ← flush left, then F1 + CALENDAR (same fonts/colors)
+        # Same strip as main header: dark bar, ← flush left, F1 + CALENDAR, import progress top-right.
         self._import_top_bar = tk.Frame(import_inner, bg=F1Theme.SECONDARY_DARK, height=120)
         self._import_top_bar.pack(fill=tk.X)
         self._import_top_bar.pack_propagate(False)
         
         import_header_row = tk.Frame(self._import_top_bar, bg=F1Theme.SECONDARY_DARK)
         import_header_row.pack(fill=tk.BOTH, expand=True, padx=24, pady=20)
+        import_header_row.grid_columnconfigure(1, weight=1)
         
         self._import_back_label = tk.Label(
             import_header_row,
@@ -614,11 +798,11 @@ class MainWindow(tk.Tk):
             padx=8,
             pady=4,
         )
-        self._import_back_label.pack(side=tk.LEFT, padx=(0, 16))
-        self._import_back_label.bind("<Button-1>", lambda e: self._on_import_back())
+        self._import_back_label.grid(row=0, column=0, sticky="w", padx=(0, 16))
+        self._import_back_label.bind("<Button-1>", self._on_import_back_click)
         
         import_logo_frame = tk.Frame(import_header_row, bg=F1Theme.SECONDARY_DARK)
-        import_logo_frame.pack(side=tk.LEFT)
+        import_logo_frame.grid(row=0, column=1, sticky="w")
         
         tk.Label(
             import_logo_frame,
@@ -637,8 +821,48 @@ class MainWindow(tk.Tk):
         )
         self._import_calendar_title_label.pack(side=tk.LEFT, padx=(8, 0))
         
+        import_right = tk.Frame(import_header_row, bg=F1Theme.SECONDARY_DARK)
+        import_right.grid(row=0, column=2, sticky="e")
+        
+        self._import_progress_bar_width = 220
+        prog_row = tk.Frame(import_right, bg=F1Theme.SECONDARY_DARK)
+        prog_row.pack(anchor="e")
+        self._import_progress_canvas = tk.Canvas(
+            prog_row,
+            bg=F1Theme.SECONDARY_DARK,
+            highlightthickness=0,
+            bd=0,
+            width=self._import_progress_bar_width,
+            height=14,
+        )
+        self._import_progress_canvas.pack(side=tk.LEFT, padx=(0, 8))
+        self._import_progress_canvas.bind("<Configure>", self._on_import_progress_canvas_configure)
+        self._import_pct_label = tk.Label(
+            prog_row,
+            text="0%",
+            font=("Arial", 14, "bold"),
+            fg=self._header_progress_accent_color(0.0),
+            bg=F1Theme.SECONDARY_DARK,
+        )
+        self._import_pct_label.pack(side=tk.LEFT)
+        
+        self._import_steps_label = tk.Label(
+            import_right,
+            text="",
+            font=("Arial", 10),
+            fg=F1Theme.TEXT_MUTED,
+            bg=F1Theme.SECONDARY_DARK,
+            justify="left",
+            anchor="e",
+            wraplength=280,
+        )
+        self._import_steps_label.pack(anchor="e", pady=(6, 0))
+        
         self._import_body = tk.Frame(import_inner, bg=F1Theme.SECONDARY)
         self._import_body.pack(fill=tk.BOTH, expand=True, padx=28, pady=(20, 28))
+        self._import_body.grid_columnconfigure(0, weight=1)
+        self._import_body.grid_columnconfigure(1, weight=2, minsize=400)
+        self._import_body.grid_rowconfigure(1, weight=1)
         
         self._import_selected_heading_label = tk.Label(
             self._import_body,
@@ -648,11 +872,76 @@ class MainWindow(tk.Tk):
             bg=F1Theme.SECONDARY,
             anchor="w",
         )
-        self._import_selected_heading_label.pack(fill=tk.X, pady=(0, 22))
+        self._import_selected_heading_label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 22))
         
-        self._import_list_container = tk.Frame(self._import_body, bg=F1Theme.SECONDARY)
-        # Do not fill=X: list width follows content so two columns stay side by side, not screen halves.
+        self._import_body_left = tk.Frame(self._import_body, bg=F1Theme.SECONDARY)
+        self._import_body_left.grid(row=1, column=0, sticky="nw", padx=(0, 8))
+        
+        self._import_list_container = tk.Frame(self._import_body_left, bg=F1Theme.SECONDARY)
         self._import_list_container.pack(anchor="w", pady=(0, 20))
+        
+        self._import_start_btn = FilterPillButton(
+            self._import_body_left,
+            text=f"{IMPORT_ACTION_ICON}  {self._t('import_start')}",
+            command=self._on_import_start_fastf1,
+            active_fill=_IMPORT_BLUE_ACTIVE,
+            active_hover=_IMPORT_BLUE_HOVER,
+            active_text=F1Theme.TEXT_PRIMARY,
+            inactive_fill="#141414",
+            inactive_hover="#141414",
+            inactive_text=F1Theme.TEXT_MUTED,
+            pill_height=36,
+            corner_radius=50,
+            pad_x=20,
+            bg_parent=F1Theme.SECONDARY,
+            allow_click_when_inactive=True,
+        )
+        self._import_start_btn.pack(anchor="w")
+        self._import_start_btn.set_active(True)
+        
+        self._import_body_right = tk.Frame(self._import_body, bg=F1Theme.SECONDARY)
+        self._import_body_right.grid(row=1, column=1, sticky="nsew", padx=(16, 0))
+        self._import_body_right.grid_columnconfigure(0, weight=1)
+        self._import_body_right.grid_rowconfigure(0, weight=1)
+        
+        self._import_log_acc = tk.Frame(self._import_body_right, bg=F1Theme.SURFACE_ELEVATED)
+        self._import_log_acc.grid(row=0, column=0, sticky="nsew")
+        self._import_log_acc.grid_columnconfigure(0, weight=1)
+        self._import_log_acc.grid_rowconfigure(1, weight=1)
+        
+        self._import_log_expanded = True
+        self._import_log_header = tk.Frame(self._import_log_acc, bg=F1Theme.SURFACE_ELEVATED, cursor="hand2")
+        self._import_log_header.grid(row=0, column=0, sticky="ew")
+        self._import_log_header_label = tk.Label(
+            self._import_log_header,
+            text=f"{self._t('import_logs_accordion')}  ▴",
+            font=("Arial", 12, "bold"),
+            fg=F1Theme.TEXT_PRIMARY,
+            bg=F1Theme.SURFACE_ELEVATED,
+        )
+        self._import_log_header_label.pack(side=tk.LEFT, padx=12, pady=10)
+        for w in (self._import_log_header, self._import_log_header_label):
+            w.bind("<Button-1>", self._toggle_import_logs)
+        
+        self._import_log_inner = tk.Frame(self._import_log_acc, bg=F1Theme.SURFACE_ELEVATED)
+        self._import_log_inner.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 10))
+        
+        self._import_log_text = tk.Text(
+            self._import_log_inner,
+            height=1,
+            width=52,
+            font=("Courier", 12),
+            fg=F1Theme.TEXT_PRIMARY,
+            bg=F1Theme.SURFACE,
+            highlightthickness=0,
+            bd=0,
+            state="disabled",
+            wrap="word",
+        )
+        log_scroll = ttk.Scrollbar(self._import_log_inner, command=self._import_log_text.yview)
+        self._import_log_text.configure(yscrollcommand=log_scroll.set)
+        self._import_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0), pady=(0, 12))
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=(0, 12), padx=(0, 12))
         
         self._import_panel.grid_remove()
     
@@ -934,9 +1223,20 @@ class MainWindow(tk.Tk):
         )
         self._fastf1_loading_label.pack(pady=40)
 
-    def _apply_fastf1_chunk(self, year: int, events: List[Event]) -> None:
+    def _apply_fastf1_chunk(
+        self,
+        year: int,
+        events: List[Event],
+        driver_champion: Optional[str] = None,
+        constructor_champion: Optional[str] = None,
+    ) -> None:
         """Main thread only: apply partial/full schedule and redraw cards."""
-        self.controller.data_store.set_season_events(year, events)
+        self.controller.data_store.set_season_events(
+            year,
+            events,
+            driver_champion=driver_champion,
+            constructor_champion=constructor_champion,
+        )
         self._current_filter = "all"
         for value, btn in self.filter_buttons.items():
             btn.set_active(value == "all")
@@ -953,7 +1253,7 @@ class MainWindow(tk.Tk):
         self._on_data_changed()
 
     def _on_import_events_fastf1(self) -> None:
-        """Fetch schedule on a worker thread; apply chunks on the main thread so Tk updates safely."""
+        """Load championship schedule from FastF1 only (no session results or champions)."""
 
         self._show_fastf1_loading()
 
@@ -963,7 +1263,10 @@ class MainWindow(tk.Tk):
 
                 def on_chunk(evs: List[Event]) -> None:
                     snap = list(evs)
-                    self.after(0, lambda s=snap, y=year: self._apply_fastf1_chunk(y, s))
+                    self.after(
+                        0,
+                        lambda s=snap, y=year: self._apply_fastf1_chunk(y, s, None, None),
+                    )
 
                 events_from_fastf1_schedule(year, on_chunk=on_chunk)
                 self.after(0, self._finalize_fastf1_import)
@@ -995,6 +1298,13 @@ class MainWindow(tk.Tk):
         self._import_btn.set_text(f"{IMPORT_ACTION_ICON}  {self._t('import_action')}")
         self._import_calendar_title_label.configure(text=self._t("calendar_title"))
         self._import_selected_heading_label.configure(text=self._import_selected_heading_text())
+        if hasattr(self, "_import_start_btn"):
+            self._import_start_btn.set_text(f"{IMPORT_ACTION_ICON}  {self._t('import_start')}")
+        if hasattr(self, "_import_log_header_label"):
+            arrow = "▴" if self._import_log_expanded else "▾"
+            self._import_log_header_label.configure(
+                text=f"{self._t('import_logs_accordion')}  {arrow}",
+            )
         self._update_import_bar()
         if self._import_view_active:
             self._refresh_import_screen_list()
@@ -1091,6 +1401,8 @@ class MainWindow(tk.Tk):
             self._import_bar.grid_remove()
             self._calendar_panel.grid_remove()
             self._import_panel.grid(row=0, column=0, sticky="nsew")
+            if not self._import_worker_running:
+                self._reset_import_progress_ui()
             self._refresh_import_screen_list()
         else:
             self._import_panel.grid_remove()
@@ -1140,6 +1452,8 @@ class MainWindow(tk.Tk):
     
     def _on_import_back(self) -> None:
         """Return to the calendar; keep import selection."""
+        if self._import_worker_running:
+            return
         self._import_view_active = False
         self._set_import_screen_visible(False)
         self._update_import_bar()

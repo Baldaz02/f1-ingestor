@@ -87,9 +87,20 @@ class DataStore:
         top = max(date.today().year, MIN_SEASON_YEAR)
         return list(range(top, MIN_SEASON_YEAR - 1, -1))
     
-    def set_season_events(self, year: int, events: List[Event]) -> None:
+    def set_season_events(
+        self,
+        year: int,
+        events: List[Event],
+        *,
+        driver_champion: Optional[str] = None,
+        constructor_champion: Optional[str] = None,
+    ) -> None:
         """Replace the season for ``year`` with the given event list (sorted by round)."""
-        season = Season(year=year, champion=None, constructor_champion=None)
+        season = Season(
+            year=year,
+            champion=driver_champion,
+            constructor_champion=constructor_champion,
+        )
         season.events = sorted(events, key=lambda e: e.round_number)
         self._seasons[year] = season
 
