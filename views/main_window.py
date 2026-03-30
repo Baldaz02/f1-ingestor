@@ -2,7 +2,6 @@
 import re
 import threading
 import tkinter as tk
-from collections import deque
 from tkinter import messagebox, ttk
 from typing import List, Optional, Set
 from controllers.season_controller import SeasonController
@@ -72,7 +71,6 @@ class MainWindow(tk.Tk):
         self._import_selected_ids: Set[str] = set()
         self._import_view_active = False
         self._import_worker_running = False
-        self._import_step_deque: deque[str] = deque(maxlen=3)
         self._last_import_progress = 0.0
         self._pagination_syncing = False
         self._pagination_prev_packed = False
@@ -415,7 +413,6 @@ class MainWindow(tk.Tk):
     
     def _reset_import_progress_ui(self) -> None:
         self._last_import_progress = 0.0
-        self._import_step_deque.clear()
         if hasattr(self, "_import_steps_label"):
             self._import_steps_label.configure(text="")
         if hasattr(self, "_import_pct_label"):
@@ -449,8 +446,7 @@ class MainWindow(tk.Tk):
             text=f"{pct:.0f}%",
             fg=self._header_progress_accent_color(pct),
         )
-        self._import_step_deque.append(self._format_import_step(step, round_num))
-        self._import_steps_label.configure(text="\n".join(self._import_step_deque))
+        self._import_steps_label.configure(text=self._format_import_step(step, round_num))
     
     def _import_append_log(self, line: str) -> None:
         if not hasattr(self, "_import_log_text"):
@@ -547,6 +543,9 @@ class MainWindow(tk.Tk):
         self._refresh_import_screen_list()
         self._set_import_back_state(True)
         self._import_start_btn.set_active(True)
+        if hasattr(self, "_import_steps_label"):
+            self._import_steps_label.configure(text=self._t("import_step_done"))
+        self._import_append_log(self._t("import_step_done"))
     
     def _import_screen_import_failed(self, exc: Exception) -> None:
         self._import_worker_running = False
@@ -780,7 +779,7 @@ class MainWindow(tk.Tk):
         import_inner.pack(fill=tk.BOTH, expand=True)
         
         # Same strip as main header: dark bar, ← flush left, F1 + CALENDAR, import progress top-right.
-        self._import_top_bar = tk.Frame(import_inner, bg=F1Theme.SECONDARY_DARK, height=120)
+        self._import_top_bar = tk.Frame(import_inner, bg=F1Theme.SECONDARY_DARK, height=140)
         self._import_top_bar.pack(fill=tk.X)
         self._import_top_bar.pack_propagate(False)
         

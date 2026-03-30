@@ -219,14 +219,14 @@ class EventCard(tk.Frame):
         # Fastest lap in qualifying
         if self.event.qualifying_fastest_lap:
             self._create_result_item(
-                results_inner, "Ⓠ", self.event.qualifying_fastest_lap, F1Theme.ACCENT_ORANGE,
+                results_inner, "⚡", self.event.qualifying_fastest_lap, F1Theme.ACCENT_ORANGE,
                 self._t("result_tooltip_qualifying_fastest"),
             )
         
         # Pole Position
         if self.event.pole_position:
             self._create_result_item(
-                results_inner, "⚡", self.event.pole_position, F1Theme.ACCENT_CYAN,
+                results_inner, "Ⓠ", self.event.pole_position, F1Theme.ACCENT_CYAN,
                 self._t("result_tooltip_pole"),
             )
         
